@@ -642,9 +642,10 @@ function selectDistrict(feature) {
 
 // Загрузка квартир из public/appartments.json. Поддерживаются разные форматы полей.
 // Текущие фильтры (устанавливаются из App.vue)
-let activeFilters = { maxPrice: null, rooms: null }
+let activeFilters = { minPrice: null, maxPrice: null, rooms: null }
 function setFilters(filters) {
   activeFilters = {
+    minPrice: (filters && Number.isFinite(filters.minPrice)) ? Number(filters.minPrice) : null,
     maxPrice: (filters && Number.isFinite(filters.maxPrice)) ? Number(filters.maxPrice) : null,
     rooms: Array.isArray(filters && filters.rooms) && filters.rooms.length ? filters.rooms.map((n) => Number(n)).filter((n) => Number.isFinite(n)) : null,
     // TODO(age-filter): включить флаг из квиза, чтобы при возрасте 0-7 лет не фильтровать вовсе
@@ -661,19 +662,30 @@ function applyFilters(apts) {
   //   return arr
   // }
   return arr.filter((ap) => {
+    // Если активен фильтр по цене, отбрасываем записи без валидной цены
+    const priceActive = activeFilters.minPrice != null || activeFilters.maxPrice != null
+    const hasPrice = Number.isFinite(ap.price)
+    if (priceActive && !hasPrice) return false
+    if (activeFilters.minPrice != null && Number.isFinite(ap.price)) {
+      if (ap.price < activeFilters.minPrice) return false
+    }
     if (activeFilters.maxPrice != null && Number.isFinite(ap.price)) {
       if (ap.price > activeFilters.maxPrice) return false
     }
     if (activeFilters.rooms && activeFilters.rooms.length) {
       const r = Number(ap.rooms)
-      if (!activeFilters.rooms.includes(r)) return false
+      const wanted = new Set(activeFilters.rooms)
+      // Интерпретация: значение 3 в фильтре означает "3 и более"
+      const match = (wanted.has(1) && r === 1) || (wanted.has(2) && r === 2) || (wanted.has(3) && r >= 3)
+      if (!match) return false
     }
     return true
   })
 }
 
 async function loadApartmentsFromJson() {
-  if (cachedApartments) return cachedApartments
+  // При наличии кэша всегда возвращаем массив с повторным применением фильтров
+  if (cachedApartments) return applyFilters(cachedApartments)
   try {
     const res = await fetch('/appartments.json', { cache: 'no-store' })
     if (!res.ok) throw new Error('Failed to load appartments.json')
@@ -720,6 +732,18 @@ async function loadApartmentsFromJson() {
       }
       return out
     }
+    // Парсер цены: извлекает число из строк вида "90 000 ₽"/"90,000"
+    const parsePrice = (v) => {
+      if (v == null) return NaN
+      if (typeof v === 'number') return v
+      if (typeof v === 'string') {
+        const digits = v.replace(/[^0-9.,]/g, '').replace(/,/g, '')
+        const n = Number(digits)
+        return Number.isFinite(n) ? n : NaN
+      }
+      return NaN
+    }
+
     cachedApartments = arr
       .map((it) => {
         const lat = Number(it.latitude ?? it.lat)
@@ -734,7 +758,7 @@ async function loadApartmentsFromJson() {
           id: it.id ?? null,
           title: it.title ?? null,
           url: it.url ?? null,
-          price: Number(it.price ?? NaN),
+          price: parsePrice(it.price ?? it.price_per_month ?? it.rent ?? null),
           area: Number(it.area ?? NaN),
           rooms: it.rooms ?? null,
           room_type: it.room_type ?? null,

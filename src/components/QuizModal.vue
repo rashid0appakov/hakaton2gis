@@ -24,20 +24,25 @@ const children = ref([])
 const editingChildId = ref(null)
 let childCounter = 0
 
-// Шаг 2: приоритеты (до 3-х)
+// Шаг 2: приоритеты (выберите один)
 const tags = [
-  { id: 'school', label: 'Сильная школа рядом' },
-  { id: 'park', label: 'Большой парк для прогулок' },
-  { id: 'kindergarten', label: 'Детсад в 10 мин. пешком' },
-  { id: 'safe-yard', label: 'Безопасный и тихий двор' },
-  { id: 'commute', label: 'Быстро добираться до работы' },
+  { id: 'kindergartens', label: 'Детские сады', emoji: '🧒' },
+  { id: 'green-yard', label: 'Зеленый сквер у дома', emoji: '🌿' },
+  { id: 'clinic-walk', label: 'Поликлиника в пешей доступности', emoji: '🏥' },
 ]
 const selectedTagIds = ref([])
 
+// Бюджет: 3 предустановленных варианта
+const budgetOptions = [
+  { id: 'lt60', label: 'до 60\u00A0000 \u20BD', max: 60000, min: null },
+  { id: 'lt90', label: 'до 90\u00A0000 \u20BD', max: 90000, min: null },
+  { id: 'ge90', label: '90\u00A0000 \u20BD и больше', max: null, min: 90000 },
+]
+const selectedBudgetId = ref(null)
+
 // --- Фильтры ---
-const maxPrice = ref(null) // число или null
 const selectedRooms = ref([]) // массив чисел
-const roomOptions = [1,2,3,4,5,6,7,8]
+const roomOptions = [1,2,3]
 
 function open() {
   isOpen.value = true
@@ -56,11 +61,13 @@ function next() {
     step.value += 1
   } else {
     const selectedTags = tags.filter((t) => selectedTagIds.value.includes(t.id))
+    const budget = budgetOptions.find((o) => o.id === selectedBudgetId.value)
     emit('complete', {
       children: children.value,
       priorities: selectedTags,
       filters: {
-        maxPrice: typeof maxPrice.value === 'number' && Number.isFinite(maxPrice.value) ? maxPrice.value : null,
+        maxPrice: (budget && budget.max != null) ? budget.max : null,
+        minPrice: (budget && budget.min != null) ? budget.min : null,
         rooms: Array.isArray(selectedRooms.value) && selectedRooms.value.length ? selectedRooms.value.slice() : null,
         // TODO(age-filter): если выбран возраст "0-7 лет", передавать маркер игнорирования фильтров
         // ignoreAllByAge07: children.value.some((c) => c.age === '0-7') ? true : false,
@@ -186,9 +193,13 @@ function toggleTag(id) {
     selectedTagIds.value.splice(idx, 1)
     return
   }
-  if (selectedTagIds.value.length < 3) {
-    selectedTagIds.value.push(id)
-  }
+  // Разрешаем выбрать только один пункт
+  selectedTagIds.value.splice(0, selectedTagIds.value.length)
+  selectedTagIds.value.push(id)
+}
+
+function toggleBudget(id) {
+  selectedBudgetId.value = selectedBudgetId.value === id ? null : id
 }
 
 function isTagSelected(id) {
@@ -251,17 +262,28 @@ onBeforeUnmount(() => {
           <button class="btn-add" @click="addChild">Добавить ребенка</button>
 
           <div class="filters">
-            <div class="filters__field">
-              <label for="priceMax" class="filters__label">Бюджет, ₽/мес (до)</label>
-              <input id="priceMax" type="number" min="0" step="1000" class="filters__input" v-model.number="maxPrice" placeholder="например, 250000" />
+          <div class="filters__field">
+            <div class="filters__label">Бюджет</div>
+            <div class="filters__budget">
+              <button
+                v-for="b in budgetOptions"
+                :key="b.id"
+                type="button"
+                class="filters__budget-btn"
+                :class="{ selected: selectedBudgetId === b.id }"
+                @click="toggleBudget(b.id)"
+              >
+                {{ b.label }}
+              </button>
             </div>
+          </div>
             <div class="filters__field">
               <div class="filters__label">Количество комнат</div>
-              <div class="filters__rooms">
+              <div class="filters__rooms filters__rooms--compact">
                 <button v-for="r in roomOptions" :key="r" type="button" class="filters__room"
                         :class="{ selected: selectedRooms.includes(r) }"
                         @click="selectedRooms.includes(r) ? selectedRooms.splice(selectedRooms.indexOf(r),1) : selectedRooms.push(r)">
-                  {{ r }}
+                  {{ r === 3 ? '3+' : r }}
                 </button>
               </div>
             </div>
@@ -271,7 +293,7 @@ onBeforeUnmount(() => {
         <div v-else-if="step === 2" class="quiz__step">
           <div class="quiz__header">
             <h2 class="quiz__title">Что для вас важнее всего?</h2>
-            <p class="quiz__subtitle">Выберите до 3-х главных приоритетов.</p>
+            <p class="quiz__subtitle">Выберите один вариант.</p>
           </div>
 
           <div class="tags">
@@ -283,7 +305,8 @@ onBeforeUnmount(() => {
               type="button"
               @click="toggleTag(t.id)"
             >
-              {{ t.label }}
+              <span class="tag__emoji" aria-hidden="true">{{ t.emoji }}</span>
+              <span class="tag__text">{{ t.label }}</span>
             </button>
           </div>
         </div>
@@ -387,12 +410,20 @@ onBeforeUnmount(() => {
 .filters__label { font-weight: 800; color: #1f2937; }
 .filters__input { border: 2px solid #e5e7eb; border-radius: 10px; padding: 8px 10px; background: #fff; color: #1f2937; }
 .filters__rooms { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.filters__rooms--compact { grid-template-columns: repeat(3, 1fr); }
 .filters__room { padding: 8px 0; border: 2px solid #e5e7eb; border-radius: 10px; background: #fff; font-weight: 700; color: #1f2937; }
 .filters__room.selected { background: #dbeafe; color: #2563eb; border-color: #93c5fd; }
+
+/* Budget buttons */
+.filters__budget { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.filters__budget-btn { padding: 10px 8px; border: 2px solid #e5e7eb; border-radius: 10px; background: #fff; font-weight: 700; color: #1f2937; }
+.filters__budget-btn.selected { background: #dbeafe; color: #2563eb; border-color: #93c5fd; }
 
 .tags { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .tag { background: #fff; border: 2px solid #e5e7eb; border-radius: 16px; padding: 12px; font-weight: 600; color: #1f2937; }
 .tag.selected { background: #eff6ff; color: #1d4ed8; border-color: #c7d2fe; }
+.tag__emoji { margin-right: 8px; font-size: 18px; }
+.tag__text { vertical-align: middle; }
 
 .quiz__spacer { height: 8px; }
 
