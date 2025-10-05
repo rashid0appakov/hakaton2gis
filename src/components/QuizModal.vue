@@ -12,7 +12,27 @@ const isDragging = ref(false)
 const offsetPx = ref(0)
 const dragStartY = ref(0)
 const dragStartOffset = ref(0)
-watch(() => props.modelValue, (v) => { isOpen.value = v })
+
+function resetState() {
+  // Полный сброс состояния квиза при новом запуске
+  step.value = 1
+  children.value = []
+  childCounter = 0
+  addChild()
+  editingChildId.value = null
+  selectedTagIds.value = []
+  selectedBudgetId.value = null
+  selectedRooms.value = []
+  isLoading.value = false
+  if (loaderTimer) { clearTimeout(loaderTimer); loaderTimer = null }
+}
+
+watch(() => props.modelValue, (v, old) => {
+  isOpen.value = v
+  if (v && old === false) {
+    resetState()
+  }
+})
 watch(isOpen, (v) => {
   emit('update:modelValue', v)
   if (v) offsetPx.value = 0

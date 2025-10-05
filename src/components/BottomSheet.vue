@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, defineExpose } from 'vue'
+import FiltersModal from './FiltersModal.vue'
 const emit = defineEmits(['pick-area', 'cluster-back', 'district-back'])
 const props = defineProps({
   district: { type: Object, default: null },
@@ -138,6 +139,26 @@ function onUnifiedBack() {
   emit('district-back')
 }
 
+const filtersOpen = ref(false)
+function openFilters() { filtersOpen.value = true }
+function closeFilters() { filtersOpen.value = false }
+const currentFilters = computed(() => ({
+  // В текущей версии фильтры живут в App.vue → MapView.
+  // Шторка хранит только локально выбранную квартиру, поэтому префилл передаём из district пропсом сверху.
+  // Ожидается, что родитель пробросит district.filters при желании.
+  minPrice: (props.district && props.district.filters && Number.isFinite(props.district.filters.minPrice)) ? props.district.filters.minPrice : null,
+  maxPrice: (props.district && props.district.filters && Number.isFinite(props.district.filters.maxPrice)) ? props.district.filters.maxPrice : null,
+  rooms: (props.district && props.district.filters && Array.isArray(props.district.filters.rooms)) ? props.district.filters.rooms : [],
+}))
+function onApplyFilters(f) {
+  // Пробрасываем наверх — App.vue применит через MapView.setFilters
+  // Здесь просто закрываем модалку
+  closeFilters()
+  // создадим кастомное событие для родителя
+  const ev = new CustomEvent('filters-apply', { detail: f })
+  try { window.dispatchEvent(ev) } catch {}
+}
+
 // ----- Оценка по критериям для выбранной квартиры -----
 function firstDistance(arr) {
   if (!arr || !arr.length) return Infinity
@@ -163,6 +184,13 @@ function percentForDistance(d) {
   return Math.max(0, Math.min(100, Math.round(((3000 - d) / 3000) * 100)))
 }
 
+function minutesForDistance(d) {
+  if (!Number.isFinite(d)) return null
+  const minutesPerKm = 12 // ~5 км/ч пешком
+  const minutes = Math.round((d / 1000) * minutesPerKm)
+  return Math.max(1, minutes)
+}
+
 const familyScores = computed(() => {
   const ap = selectedApartment.value
   if (!ap) return null
@@ -180,7 +208,8 @@ const familyScores = computed(() => {
     const score = scoreForDistance(it.distance)
     const percent = percentForDistance(it.distance)
     const verdict = band === 'green' ? 'Отлично' : band === 'yellow' ? 'Хорошо' : 'Удовлетворительно'
-    return { ...it, band, score, percent, verdict }
+    const minutes = minutesForDistance(it.distance)
+    return { ...it, band, score, percent, verdict, minutes }
   })
 })
 
@@ -262,7 +291,10 @@ function getPhotoBg(idx) {
             </button>
             <div class="district-card__margin">
               <h3 class="district-card__title">{{ district.name }}</h3>
-              <span class="district-card__score">Подобрано: {{ currentDistrictCount }} квартир</span>
+              <div class="district-card__meta">
+                <span class="district-card__score">Подобрано: {{ currentDistrictCount }} квартир</span>
+                <span v-if="district.rating != null" class="district-card__match">Совпадение: <strong>{{ district.rating }}</strong>/10</span>
+              </div>
             </div>
           </div>
         </div>
@@ -312,6 +344,7 @@ function getPhotoBg(idx) {
                   <div class="family-score__bar">
                     <div class="family-score__bar-fill" :class="'is-' + row.band" :style="{ width: row.percent + '%' }" />
                   </div>
+                <div v-if="row.minutes != null" class="family-score__foot">~ {{ row.minutes }} мин пешком</div>
                 </div>
               </div>
             </div>
@@ -346,11 +379,21 @@ function getPhotoBg(idx) {
           </div>
         </div>
 
+        <div v-if="district" class="filters-cta">
+          <button class="filters-btn" type="button" @click="openFilters">
+            <span class="filters-btn__icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </span>
+            Фильтры
+          </button>
+        </div>
+
         <div class="sheet__spacer" />
       </div>
     </div>
   </div>
-  
+  <FiltersModal v-model="filtersOpen" :initial-filters="currentFilters" @apply="onApplyFilters" />
+
 </template>
 
 <style scoped>
@@ -411,13 +454,14 @@ function getPhotoBg(idx) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #f3f4f6; /* gray-100 */
-  color: #111827; /* gray-900 */
+  background: #111827; /* gray-100 */
+  color: #f3f4f6; /* gray-900 */
   border-radius: 9999px;
   padding: 10px 16px;
   font-size: 14px;
   font-weight: 600;
   border: none;
+  margin: 10px 0;
 }
 
 .cta__icon {
@@ -454,6 +498,10 @@ function getPhotoBg(idx) {
 .chip__icon {
   display: inline-flex;
 }
+
+.filters-cta { display: flex; justify-content: center; }
+.filters-btn { display: inline-flex; align-items: center; gap: 8px; background: #1d4ed8; color: #fff; border: none; border-radius: 12px; padding: 10px 16px; font-weight: 800; }
+.filters-btn__icon { display: inline-flex; }
 
 .sheet__search {
   padding-top: 4px;
@@ -497,7 +545,9 @@ function getPhotoBg(idx) {
 .district-card { background: #fff; border: 2px solid #e5e7eb; border-radius: 12px; padding: 12px; }
 .district-card__header { display: flex; align-items: center; }
 .district-card__title { font-weight: 800; color: #1f2937; margin: 10px 0;}
+.district-card__meta { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .district-card__score { color: #10B981; font-weight: 700; }
+.district-card__match { color: #10B981; font-weight: 800; }
 
 /* Cluster list */
 .cluster-card { background: #fff; border: 2px solid #e5e7eb; border-radius: 12px; padding: 12px; display: grid; gap: 10px; overflow: auto;}
@@ -547,6 +597,8 @@ function getPhotoBg(idx) {
 .family-score__bar-fill.is-green { background: #10B981; }
 .family-score__bar-fill.is-yellow { background: #F59E0B; }
 .family-score__bar-fill.is-red { background: #EF4444; }
+
+.family-score__foot { color: #374151; font-size: 12px; }
 
 /* Highlights */
 .highlights { margin-top: 8px; }
